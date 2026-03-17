@@ -21,6 +21,7 @@ export default function App() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const [modelName, setModelName] = useState('gemini-2.0-flash');
   const generationIdRef = React.useRef(0);
 
   // Load initial data
@@ -39,9 +40,11 @@ export default function App() {
         const savedMessages = localStorage.getItem('toeic_chat_messages');
         const savedRound = localStorage.getItem('toeic_current_round');
         const savedApiKey = localStorage.getItem('gemini_api_key');
+        const savedModelName = localStorage.getItem('gemini_model_name');
 
         if (savedMessages) setMessages(JSON.parse(savedMessages));
         if (savedRound) setCurrentRound(parseInt(savedRound, 10));
+        if (savedModelName) setModelName(savedModelName);
         if (savedApiKey) {
           setApiKey(savedApiKey);
         } else if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY') {
@@ -63,8 +66,9 @@ export default function App() {
       localStorage.setItem('toeic_chat_messages', JSON.stringify(messages));
       localStorage.setItem('toeic_current_round', currentRound.toString());
       localStorage.setItem('gemini_api_key', apiKey);
+      localStorage.setItem('gemini_model_name', modelName);
     }
-  }, [messages, currentRound, isLoading, apiKey]);
+  }, [messages, currentRound, isLoading, apiKey, modelName]);
 
   // Handle initial question generation or empty state
   useEffect(() => {
@@ -135,7 +139,7 @@ export default function App() {
     const currentGenId = ++generationIdRef.current;
     const roundToUse = roundOverride ?? currentRound;
     try {
-      const questionText = await generateQuestions(vocab, roundToUse, apiKey);
+      const questionText = await generateQuestions(vocab, roundToUse, apiKey, modelName);
       if (currentGenId !== generationIdRef.current) return;
       const newMessage: Message = {
         id: Date.now().toString(),
@@ -147,12 +151,18 @@ export default function App() {
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to generate questions:', error);
+      
+      let errorMessage = 'Sorry, I encountered an error generating questions. Please try again.';
+      if (error?.status === 429) {
+        errorMessage = '⚠️ API 額度已耗盡 (Quota Exceeded)。請稍後再試，或更換其他模型的 API Key。';
+      }
+      
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now().toString(),
           role: 'assistant',
-          content: 'Sorry, I encountered an error generating questions. Please try again.',
+          content: errorMessage,
           isQuestion: false,
         },
       ]);
@@ -189,7 +199,7 @@ export default function App() {
       // Find the last question
       const lastQuestion = [...messages].reverse().find((m) => m.isQuestion)?.content || '';
 
-      const result = await evaluateAnswers(lastQuestion, userAnswer, vocab, currentRound, apiKey);
+      const result = await evaluateAnswers(lastQuestion, userAnswer, vocab, currentRound, apiKey, modelName);
       if (currentGenId !== generationIdRef.current) return;
 
       // Update vocab
@@ -260,12 +270,18 @@ export default function App() {
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to evaluate answers:', error);
+      
+      let errorMessage = 'Sorry, I encountered an error evaluating your answer. Please try again.';
+      if (error?.status === 429) {
+        errorMessage = '⚠️ API 額度已耗盡 (Quota Exceeded)。請稍後再試，或更換其他模型的 API Key。';
+      }
+
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: 'Sorry, I encountered an error evaluating your answer. Please try again.',
+          content: errorMessage,
           isQuestion: false,
         },
       ]);
@@ -441,6 +457,24 @@ export default function App() {
                 />
                 <p className="mt-1 text-xs text-gray-500">
                   Your API key is stored locally in your browser.
+                </p>
+              </div>
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Gemini Model
+                </label>
+                <select
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                >
+                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                  <option value="gemini-2.0-pro-exp-02-05">gemini-2.0-pro-exp-02-05</option>
+                  <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Select which model variant to use.
                 </p>
               </div>
             </div>

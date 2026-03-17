@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = `
 2. 選擇題的各個選項（A, B, C, D）之間**必須換行**，讓每個選項獨立一行，方便閱讀。
 `;
 
-export async function generateQuestions(vocab: any[], currentRound: number, apiKey: string) {
+export async function generateQuestions(vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-2.0-flash') {
   const ai = new GoogleGenAI({ apiKey });
   const vocabWithCooldown = vocab.map(v => {
     const roundsSinceTested = currentRound - v.lastTestedRound;
@@ -48,14 +48,14 @@ ${JSON.stringify(vocabWithCooldown)}
 `;
 
   try {
-    console.log('[Gemini] Generating questions with apiKey length:', apiKey?.length, 'model: gemini-2.0-flash');
+    console.log('[Gemini] Generating questions with apiKey length:', apiKey?.length, 'model:', modelName);
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('Gemini API request timed out (30s)')), 30000);
     });
 
     const response = await Promise.race([
       ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-preview',
+        model: modelName,
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_PROMPT,
@@ -82,11 +82,15 @@ ${JSON.stringify(vocabWithCooldown)}
     console.error('[Gemini] Error message:', error?.message);
     console.error('[Gemini] Error status:', error?.status);
     console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
+    
+    // Ensure the status is attached to the thrown error block
+    if (error?.status && !error.status) error.status = error.status;
+    
     throw error;
   }
 }
 
-export async function evaluateAnswers(questions: string, userAnswer: string, vocab: any[], currentRound: number, apiKey: string) {
+export async function evaluateAnswers(questions: string, userAnswer: string, vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-2.0-flash') {
   const ai = new GoogleGenAI({ apiKey });
   const vocabWithCooldown = vocab.map(v => {
     const roundsSinceTested = currentRound - v.lastTestedRound;
@@ -115,13 +119,11 @@ ${JSON.stringify(vocabWithCooldown)}
 2. 答錯或猶豫：降級 (O -> ^, 或 ^ -> X)。
 3. 已經是 O 區且答對，保持 O 區；已經是 X 區且答錯，保持 X 區。
 
-請回傳 JSON 格式，包含：
-- \`message\`: 給使用者的解析與回饋（Markdown 格式，請在回饋中明確告知哪些單字升級或降級了）
-- \`updates\`: 需要更新級別的單字陣列。每個物件包含：
-  - \`word\`: 必須與單字庫中的拼字完全一致（純單字，絕對不可加上 "-to-^" 或其他後綴字元）
-  - \`newLevel\`: 更新後的級別字串，只能是 'O', '^', 'X' 其中之一。
-  若無變動可傳空陣列。
-- \`testedWords\`: 本次作為主考題的單字陣列（純字串陣列，必須與單字庫中的拼字完全一致）
+請呼叫 \`update_vocabulary_levels\` 函式來回報評估結果，包含給使用者的回饋、需要更新級別的單字，以及本次作為主考題的單字。
+【注意事項】：
+- updates 裡的 word 必須與單字庫中的拼字完全一致（純單字，不可加上後綴字元，例如 "-to-^"）。
+- testedWords 是本次作為主考題的單字陣列（純字串陣列，拼字必須完全一致）。
+- message 是給使用者的解析與回饋（ Markdown 格式，明確告知哪些單字升降級）。
 `;
 
   try {
@@ -131,49 +133,89 @@ ${JSON.stringify(vocabWithCooldown)}
 
     const response = await Promise.race([
       ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-preview',
+        model: modelName,
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_PROMPT,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              message: { type: Type.STRING },
-              updates: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    word: { type: Type.STRING },
-                    newLevel: { type: Type.STRING }
+          tools: [{
+            functionDeclarations: [{
+              name: 'update_vocabulary_levels',
+              description: 'Report the evaluation result, including user feedback, vocabulary level updates, and tested words.',
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  message: { 
+                    type: Type.STRING,
+                    description: '給使用者的解析與回饋（Markdown 格式，請在回饋中明確告知哪些單字升級或降級了）'
+                  },
+                  updates: {
+                    type: Type.ARRAY,
+                    description: '需要更新級別的單字陣列。若無變動可傳空陣列。',
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        word: { type: Type.STRING, description: '必須與單字庫中的拼字完全一致。' },
+                        newLevel: { type: Type.STRING, description: '更新後的級別字串，只能是 "O", "^", "X" 其中之一。' }
+                      },
+                      required: ['word', 'newLevel']
+                    }
+                  },
+                  testedWords: {
+                    type: Type.ARRAY,
+                    description: '本次作為主考題的單字陣列',
+                    items: { type: Type.STRING }
                   }
-                }
-              },
-              testedWords: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
+                },
+                required: ['message', 'updates', 'testedWords']
               }
-            },
-            required: ['message', 'updates', 'testedWords']
-          }
+            }]
+          }]
         }
       }),
       timeoutPromise
     ]) as any;
 
-    const parsed = JSON.parse(response.text!);
-    if (parsed.message) {
-      parsed.message = parsed.message
+    let result = {
+      message: response.text || '解析完成。',
+      updates: [],
+      testedWords: []
+    };
+
+    // Extract tool calls from the response if any
+    const functionCall = response.functionCalls?.[0];
+    if (functionCall && functionCall.name === 'update_vocabulary_levels') {
+      const args = functionCall.args as any;
+      result.message = args.message || result.message;
+      result.updates = args.updates || [];
+      result.testedWords = args.testedWords || [];
+    } else {
+      // Fallback: If no function call, check if the model still generated JSON
+      try {
+        const parsed = JSON.parse(response.text!);
+        if (parsed.updates) result.updates = parsed.updates;
+        if (parsed.testedWords) result.testedWords = parsed.testedWords;
+        if (parsed.message) result.message = parsed.message;
+      } catch (e) {
+        // Not a JSON response, fallback to plain text message
+      }
+    }
+
+    if (result.message) {
+      result.message = result.message
         .replace(/\\n/g, '\n')
         .replace(/<br\s*\/?>/gi, '\n');
     }
-    return parsed;
+    
+    return result;
   } catch (error: any) {
     console.error('[Gemini] evaluateAnswers ERROR:', error);
     console.error('[Gemini] Error message:', error?.message);
     console.error('[Gemini] Error status:', error?.status);
     console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
+    
+    // Ensure the status is attached to the thrown error block
+    if (error?.status && !error.status) error.status = error.status;
+    
     throw error;
   }
 }
