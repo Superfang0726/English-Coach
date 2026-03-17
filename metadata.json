@@ -1,0 +1,5 @@
+{
+  "name": "TOEIC Vocab Coach",
+  "description": "A dynamic risk management TOEIC vocabulary trainer powered by Gemini, with Excel-based storage.",
+  "requestFramePermissions": []
+}
