@@ -151,12 +151,12 @@ export default function App() {
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to generate questions:', error);
-      
+
       let errorMessage = 'Sorry, I encountered an error generating questions. Please try again.';
       if (error?.status === 429) {
         errorMessage = '⚠️ API 額度已耗盡 (Quota Exceeded)。請稍後再試，或更換其他模型的 API Key。';
       }
-      
+
       setMessages((prev) => [
         ...prev,
         {
@@ -222,14 +222,14 @@ export default function App() {
       if (result.updates && Array.isArray(result.updates)) {
         result.updates.forEach((update: any) => {
           if (!update.word || !update.newLevel) return;
-          
+
           // 1. Try to clean the word by extracting just the alphabetical prefix
           let cleanWord = update.word.toLowerCase().trim();
           const match = update.word.match(/([a-zA-Z\s]+)/);
           if (match) {
             cleanWord = match[1].trim().toLowerCase();
           }
-          
+
           // 2. Try exact match first
           let index = updatedVocab.findIndex(
             (v) => v.word.trim().toLowerCase() === cleanWord
@@ -239,16 +239,16 @@ export default function App() {
           // Gemini sometimes hallucinates slightly different spellings or includes the base word inside a larger string.
           if (index === -1) {
             index = updatedVocab.findIndex((v) => {
-               const vWord = v.word.trim().toLowerCase();
-               return cleanWord.includes(vWord) || vWord.includes(cleanWord);
+              const vWord = v.word.trim().toLowerCase();
+              return cleanWord.includes(vWord) || vWord.includes(cleanWord);
             });
           }
           if (index !== -1) {
             const oldLevel = updatedVocab[index].level;
             const newLevel = update.newLevel;
             if (['O', '^', 'X'].includes(newLevel) && oldLevel !== newLevel) {
-              updatedVocab[index] = { 
-                ...updatedVocab[index], 
+              updatedVocab[index] = {
+                ...updatedVocab[index],
                 level: newLevel,
                 remarks: `從 ${oldLevel} 區移動到 ${newLevel} 區`
               };
@@ -270,7 +270,7 @@ export default function App() {
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to evaluate answers:', error);
-      
+
       let errorMessage = 'Sorry, I encountered an error evaluating your answer. Please try again.';
       if (error?.status === 429) {
         errorMessage = '⚠️ API 額度已耗盡 (Quota Exceeded)。請稍後再試，或更換其他模型的 API Key。';
@@ -395,8 +395,8 @@ export default function App() {
           </div>
           <div className="flex-1 overflow-hidden">
             <div className="h-full pr-2">
-              <VocabTable 
-                vocab={vocab} 
+              <VocabTable
+                vocab={vocab}
                 currentRound={currentRound}
                 onAddWord={handleAddWord}
                 onDeleteWord={handleDeleteWord}
@@ -436,7 +436,7 @@ export default function App() {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-bold text-gray-900">Settings</h3>
-              <button 
+              <button
                 onClick={() => setShowSettings(false)}
                 className="text-gray-400 hover:text-gray-600"
               >
@@ -446,7 +446,15 @@ export default function App() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Gemini API Key
+                  Gemini API Key{" "}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-500 hover:text-indigo-700 text-xs font-normal underline"
+                  >
+                    Get API Key
+                  </a>
                 </label>
                 <input
                   type="text"
@@ -488,7 +496,8 @@ export default function App() {
             </div>
           </div>
         </div>
-      )}
-    </div>
+      )
+      }
+    </div >
   );
 }

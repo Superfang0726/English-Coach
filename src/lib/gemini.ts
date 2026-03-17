@@ -18,7 +18,7 @@ const SYSTEM_PROMPT = `
 2. 間隔重複 (Cooldown 機制)：我最近剛問過、剛測驗過、或剛升降級的單字，必須進入「冷卻期」，至少間隔 3-5 輪以上才能再次作為主考題出現。絕對不要連續考同一個字。
 3. 測驗模式：每次出 2 題單選題。題幹中需刻意埋入 1-2 個 O 區單字作為背景。
 4. 測驗後處理：我回覆選項後，請進行「錯誤診斷」，並根據我的表現動態更新單字級別，列出最新的變動狀態。
-5. 出題規定：必須要檢查題目中是否有可填入的空格
+5. 出題規定：檢查題目中是否有底線作為填入答案的空格
 
 ## 三、 輸出排版要求
 1. **絕對不要**使用 HTML 標籤（如 <br> 或 <br/>）。請一律使用 Markdown 的標準換行符號。
@@ -82,10 +82,10 @@ ${JSON.stringify(vocabWithCooldown)}
     console.error('[Gemini] Error message:', error?.message);
     console.error('[Gemini] Error status:', error?.status);
     console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
-    
+
     // Ensure the status is attached to the thrown error block
     if (error?.status && !error.status) error.status = error.status;
-    
+
     throw error;
   }
 }
@@ -144,7 +144,7 @@ ${JSON.stringify(vocabWithCooldown)}
               parameters: {
                 type: Type.OBJECT,
                 properties: {
-                  message: { 
+                  message: {
                     type: Type.STRING,
                     description: '給使用者的解析與回饋（Markdown 格式，請在回饋中明確告知哪些單字升級或降級了）'
                   },
@@ -205,17 +205,17 @@ ${JSON.stringify(vocabWithCooldown)}
         .replace(/\\n/g, '\n')
         .replace(/<br\s*\/?>/gi, '\n');
     }
-    
+
     return result;
   } catch (error: any) {
     console.error('[Gemini] evaluateAnswers ERROR:', error);
     console.error('[Gemini] Error message:', error?.message);
     console.error('[Gemini] Error status:', error?.status);
     console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
-    
+
     // Ensure the status is attached to the thrown error block
     if (error?.status && !error.status) error.status = error.status;
-    
+
     throw error;
   }
 }
