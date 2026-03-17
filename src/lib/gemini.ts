@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 const SYSTEM_PROMPT = `
 # Role: TOEIC 單字訓練教練 (Dynamic Risk Management Mode)
 
-請擔任我的 TOEIC 單字教練。我有一套專屬的「動態縮小風險區」學習系統與既有的單字資料庫。請完全繼承以下規則與當前進度，與我進行後續的測驗。
+請擔任我的 TOEIC 單字教練。我有一套專屬的「動態縮小風險區」學習系統與既有的單字資料庫。
 
 ## 一、 風險分類定義 (根據我的「大腦體感」定義)
 1. O (自我懷疑區)：看到知道意思，但會自我懷疑或猶豫。
@@ -18,6 +18,7 @@ const SYSTEM_PROMPT = `
 2. 間隔重複 (Cooldown 機制)：我最近剛問過、剛測驗過、或剛升降級的單字，必須進入「冷卻期」，至少間隔 3-5 輪以上才能再次作為主考題出現。絕對不要連續考同一個字。
 3. 測驗模式：每次出 2 題單選題。題幹中需刻意埋入 1-2 個 O 區單字作為背景。
 4. 測驗後處理：我回覆選項後，請進行「錯誤診斷」，並根據我的表現動態更新單字級別，列出最新的變動狀態。
+5. 出題規定：必須要檢查題目中是否有可填入的空格
 
 ## 三、 輸出排版要求
 1. **絕對不要**使用 HTML 標籤（如 <br> 或 <br/>）。請一律使用 Markdown 的標準換行符號。
@@ -46,26 +47,43 @@ ${JSON.stringify(vocabWithCooldown)}
 請回傳 JSON 格式，包含 \`message\` 欄位（題目內容，請用 Markdown 格式排版）。
 `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.1-pro-preview',
-    contents: prompt,
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          message: { type: Type.STRING }
-        },
-        required: ['message']
-      }
-    }
-  });
+  try {
+    console.log('[Gemini] Generating questions with apiKey length:', apiKey?.length, 'model: gemini-2.0-flash');
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Gemini API request timed out (30s)')), 30000);
+    });
 
-  const parsed = JSON.parse(response.text!);
-  return parsed.message
-    .replace(/\\n/g, '\n')
-    .replace(/<br\s*\/?>/gi, '\n');
+    const response = await Promise.race([
+      ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite-preview',
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              message: { type: Type.STRING }
+            },
+            required: ['message']
+          }
+        }
+      }),
+      timeoutPromise
+    ]) as any;
+
+    console.log('[Gemini] Response received:', response.text?.substring(0, 200));
+    const parsed = JSON.parse(response.text!);
+    return parsed.message
+      .replace(/\\n/g, '\n')
+      .replace(/<br\s*\/?>/gi, '\n');
+  } catch (error: any) {
+    console.error('[Gemini] generateQuestions ERROR:', error);
+    console.error('[Gemini] Error message:', error?.message);
+    console.error('[Gemini] Error status:', error?.status);
+    console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
+    throw error;
+  }
 }
 
 export async function evaluateAnswers(questions: string, userAnswer: string, vocab: any[], currentRound: number, apiKey: string) {
@@ -99,45 +117,63 @@ ${JSON.stringify(vocabWithCooldown)}
 
 請回傳 JSON 格式，包含：
 - \`message\`: 給使用者的解析與回饋（Markdown 格式，請在回饋中明確告知哪些單字升級或降級了）
-- \`updates\`: 需要更新級別的單字陣列。每個物件包含 \`word\` (必須與單字庫中的拼字完全一致) 與 \`newLevel\` ('O', '^', 'X')。若無變動可傳空陣列。
+- \`updates\`: 需要更新級別的單字陣列。每個物件包含：
+  - \`word\`: 必須與單字庫中的拼字完全一致（純單字，絕對不可加上 "-to-^" 或其他後綴字元）
+  - \`newLevel\`: 更新後的級別字串，只能是 'O', '^', 'X' 其中之一。
+  若無變動可傳空陣列。
 - \`testedWords\`: 本次作為主考題的單字陣列（純字串陣列，必須與單字庫中的拼字完全一致）
 `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.1-pro-preview',
-    contents: prompt,
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          message: { type: Type.STRING },
-          updates: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                word: { type: Type.STRING },
-                newLevel: { type: Type.STRING }
-              }
-            }
-          },
-          testedWords: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING }
-          }
-        },
-        required: ['message', 'updates', 'testedWords']
-      }
-    }
-  });
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Gemini API request timed out (30s)')), 30000);
+    });
 
-  const parsed = JSON.parse(response.text!);
-  if (parsed.message) {
-    parsed.message = parsed.message
-      .replace(/\\n/g, '\n')
-      .replace(/<br\s*\/?>/gi, '\n');
+    const response = await Promise.race([
+      ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite-preview',
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              message: { type: Type.STRING },
+              updates: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    word: { type: Type.STRING },
+                    newLevel: { type: Type.STRING }
+                  }
+                }
+              },
+              testedWords: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ['message', 'updates', 'testedWords']
+          }
+        }
+      }),
+      timeoutPromise
+    ]) as any;
+
+    const parsed = JSON.parse(response.text!);
+    if (parsed.message) {
+      parsed.message = parsed.message
+        .replace(/\\n/g, '\n')
+        .replace(/<br\s*\/?>/gi, '\n');
+    }
+    return parsed;
+  } catch (error: any) {
+    console.error('[Gemini] evaluateAnswers ERROR:', error);
+    console.error('[Gemini] Error message:', error?.message);
+    console.error('[Gemini] Error status:', error?.status);
+    console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
+    throw error;
   }
-  return parsed;
 }

@@ -42,7 +42,11 @@ export default function App() {
 
         if (savedMessages) setMessages(JSON.parse(savedMessages));
         if (savedRound) setCurrentRound(parseInt(savedRound, 10));
-        if (savedApiKey) setApiKey(savedApiKey);
+        if (savedApiKey) {
+          setApiKey(savedApiKey);
+        } else if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY') {
+          setApiKey(process.env.GEMINI_API_KEY);
+        }
       } catch (error) {
         console.error('Failed to load vocab:', error);
         setVocab([]);
@@ -208,9 +212,27 @@ export default function App() {
       if (result.updates && Array.isArray(result.updates)) {
         result.updates.forEach((update: any) => {
           if (!update.word || !update.newLevel) return;
-          const index = updatedVocab.findIndex(
-            (v) => v.word.toLowerCase() === update.word.toLowerCase()
+          
+          // 1. Try to clean the word by extracting just the alphabetical prefix
+          let cleanWord = update.word.toLowerCase().trim();
+          const match = update.word.match(/([a-zA-Z\s]+)/);
+          if (match) {
+            cleanWord = match[1].trim().toLowerCase();
+          }
+          
+          // 2. Try exact match first
+          let index = updatedVocab.findIndex(
+            (v) => v.word.trim().toLowerCase() === cleanWord
           );
+
+          // 3. Fallback: If no exact match, try to see if any vocab word is practically identical
+          // Gemini sometimes hallucinates slightly different spellings or includes the base word inside a larger string.
+          if (index === -1) {
+            index = updatedVocab.findIndex((v) => {
+               const vWord = v.word.trim().toLowerCase();
+               return cleanWord.includes(vWord) || vWord.includes(cleanWord);
+            });
+          }
           if (index !== -1) {
             const oldLevel = updatedVocab[index].level;
             const newLevel = update.newLevel;
@@ -411,7 +433,7 @@ export default function App() {
                   Gemini API Key
                 </label>
                 <input
-                  type="password"
+                  type="text"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="Enter your Gemini API key"
