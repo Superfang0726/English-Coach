@@ -15,6 +15,20 @@ type VocabItem = {
 
 const AVAILABLE_MODELS = ['gemini-3.1-flash-lite-preview'];
 const DEFAULT_MODEL_NAME = AVAILABLE_MODELS[0];
+const GENERATE_QUESTIONS_RETRY_MESSAGE = 'Sorry, I encountered an error generating questions. Please try again.';
+const EVALUATE_ANSWER_RETRY_MESSAGE = 'Sorry, I encountered an error evaluating your answer. Please try again.';
+const RETRYABLE_ERROR_MESSAGES = new Set([
+  GENERATE_QUESTIONS_RETRY_MESSAGE,
+  EVALUATE_ANSWER_RETRY_MESSAGE,
+]);
+
+type RetryAction = 'generateQuestions' | 'evaluateAnswer';
+
+const isRetryableErrorMessage = (message: Message) => (
+  message.role === 'assistant'
+  && !message.isQuestion
+  && RETRYABLE_ERROR_MESSAGES.has(message.content)
+);
 
 export default function App() {
   const [vocab, setVocab] = useState<VocabItem[]>([]);
@@ -29,6 +43,7 @@ export default function App() {
   const [isVocabPanelCollapsed, setIsVocabPanelCollapsed] = useState(false);
   const [isDarkReadingMode, setIsDarkReadingMode] = useState(false);
   const [pendingVocabularySuggestions, setPendingVocabularySuggestions] = useState<SuggestedVocabularyAddition[]>([]);
+  const [pendingRetryAction, setPendingRetryAction] = useState<RetryAction | null>(null);
   const generationIdRef = React.useRef(0);
 
   // Load initial data
@@ -50,7 +65,18 @@ export default function App() {
         const savedModelName = localStorage.getItem('gemini_model_name');
         const savedDarkReadingMode = localStorage.getItem(DARK_READING_MODE_STORAGE_KEY);
 
-        if (savedMessages) setMessages(JSON.parse(savedMessages));
+        if (savedMessages) {
+          const parsedMessages = JSON.parse(savedMessages) as Message[];
+          const retryableError = [...parsedMessages].reverse().find(isRetryableErrorMessage);
+          if (retryableError) {
+            setPendingRetryAction(
+              retryableError.content === GENERATE_QUESTIONS_RETRY_MESSAGE
+                ? 'generateQuestions'
+                : 'evaluateAnswer'
+            );
+          }
+          setMessages(parsedMessages.filter((message) => !isRetryableErrorMessage(message)));
+        }
         if (savedRound) setCurrentRound(parseInt(savedRound, 10));
         setIsDarkReadingMode(parseDarkReadingModePreference(savedDarkReadingMode));
         if (savedModelName && AVAILABLE_MODELS.includes(savedModelName)) {
@@ -73,10 +99,22 @@ export default function App() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    const retryableError = [...messages].reverse().find(isRetryableErrorMessage);
+    if (!retryableError) return;
+
+    setPendingRetryAction(
+      retryableError.content === GENERATE_QUESTIONS_RETRY_MESSAGE
+        ? 'generateQuestions'
+        : 'evaluateAnswer'
+    );
+    setMessages((current) => current.filter((message) => !isRetryableErrorMessage(message)));
+  }, [messages]);
+
   // Save state to localStorage
   useEffect(() => {
     if (!isLoading) {
-      localStorage.setItem('toeic_chat_messages', JSON.stringify(messages));
+      localStorage.setItem('toeic_chat_messages', JSON.stringify(messages.filter((message) => !isRetryableErrorMessage(message))));
       localStorage.setItem('toeic_current_round', currentRound.toString());
       localStorage.setItem('gemini_api_key', apiKey);
       localStorage.setItem('gemini_model_name', modelName);
@@ -86,7 +124,7 @@ export default function App() {
 
   // Handle initial question generation or empty state
   useEffect(() => {
-    if (!isLoading && messages.length === 0 && !isGenerating) {
+    if (!isLoading && messages.length === 0 && !isGenerating && !pendingRetryAction) {
       if (vocab.length > 0) {
         handleGenerateQuestions();
       } else {
@@ -98,7 +136,7 @@ export default function App() {
         }]);
       }
     }
-  }, [isLoading, messages.length, vocab.length, isGenerating]);
+  }, [isLoading, messages.length, vocab.length, isGenerating, pendingRetryAction]);
 
   const handleAddWord = async (word: string, meaning: string, level: string) => {
     const cleanWord = word.trim();
@@ -187,6 +225,7 @@ export default function App() {
       return;
     }
     setIsGenerating(true);
+    setPendingRetryAction(null);
     const currentGenId = ++generationIdRef.current;
     const roundToUse = roundOverride ?? currentRound;
     try {
@@ -203,6 +242,9 @@ export default function App() {
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to generate questions:', error);
+      if (error?.status !== 429) {
+        setPendingRetryAction('generateQuestions');
+      }
 
       let errorMessage = 'Sorry, I encountered an error generating questions. Please try again.';
       if (error?.status === 429) {
@@ -225,7 +267,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (userAnswer: string) => {
+  const handleSendMessage = async (userAnswer: string, options: { appendUserMessage?: boolean } = {}) => {
     if (!apiKey) {
       setMessages((prev) => [
         ...prev,
@@ -243,8 +285,11 @@ export default function App() {
       role: 'user',
       content: userAnswer,
     };
-    setMessages((prev) => [...prev, userMsg]);
+    if (options.appendUserMessage ?? true) {
+      setMessages((prev) => [...prev, userMsg]);
+    }
     setIsGenerating(true);
+    setPendingRetryAction(null);
     const currentGenId = ++generationIdRef.current;
 
     try {
@@ -326,6 +371,9 @@ export default function App() {
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to evaluate answers:', error);
+      if (error?.status !== 429) {
+        setPendingRetryAction('evaluateAnswer');
+      }
 
       let errorMessage = 'Sorry, I encountered an error evaluating your answer. Please try again.';
       if (error?.status === 429) {
@@ -354,6 +402,18 @@ export default function App() {
     handleGenerateQuestions(nextRound);
   };
 
+  const handleRetry = () => {
+    if (pendingRetryAction === 'generateQuestions') {
+      handleGenerateQuestions();
+      return;
+    }
+
+    const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+    if (pendingRetryAction === 'evaluateAnswer' && lastUserMessage) {
+      handleSendMessage(lastUserMessage.content, { appendUserMessage: false });
+    }
+  };
+
   const handleReset = () => {
     setShowResetConfirm(true);
   };
@@ -363,12 +423,14 @@ export default function App() {
     setMessages([]);
     setCurrentRound(1);
     setIsGenerating(false);
+    setPendingRetryAction(null);
     localStorage.removeItem('toeic_chat_messages');
     localStorage.removeItem('toeic_current_round');
     setShowResetConfirm(false);
   };
 
   const currentVocabularySuggestion = pendingVocabularySuggestions[0];
+  const visibleMessages = messages.filter((message) => !isRetryableErrorMessage(message));
 
   if (isLoading) {
     return (
@@ -447,14 +509,16 @@ export default function App() {
           </div>
           <div className="relative flex-1 overflow-hidden">
             <Chat
-              messages={messages}
+              messages={visibleMessages}
               isGenerating={isGenerating}
               onSendMessage={handleSendMessage}
               onNextRound={handleNextRound}
+              onRetry={handleRetry}
+              hasRetryAction={pendingRetryAction !== null}
               isDarkReadingMode={isDarkReadingMode}
             />
             {currentVocabularySuggestion && (
-              <div className="pointer-events-none absolute inset-x-4 bottom-4 z-20 flex justify-center">
+              <div className="pointer-events-none absolute inset-x-4 top-1/8 z-20 flex -translate-y-1/2 justify-center">
                 <div className={`pointer-events-auto w-full max-w-md rounded-xl border p-4 shadow-2xl backdrop-blur ${isDarkReadingMode ? 'border-slate-700 bg-slate-900/95 text-slate-100' : 'border-indigo-100 bg-white/95 text-gray-900'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

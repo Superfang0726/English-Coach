@@ -17,6 +17,8 @@ interface ChatProps {
   isGenerating: boolean;
   onSendMessage: (message: string) => void;
   onNextRound: () => void;
+  onRetry: () => void;
+  hasRetryAction: boolean;
   isDarkReadingMode?: boolean;
 }
 
@@ -66,6 +68,8 @@ export function Chat({
   isGenerating,
   onSendMessage,
   onNextRound,
+  onRetry,
+  hasRetryAction,
   isDarkReadingMode = false,
 }: ChatProps) {
   const [input, setInput] = useState('');
@@ -88,7 +92,7 @@ export function Chat({
 
   const lastMessage = messages[messages.length - 1];
   const isWaitingForAnswer = lastMessage?.role === 'assistant' && lastMessage?.isQuestion;
-  const isWaitingForNextRound = lastMessage?.role === 'assistant' && !lastMessage?.isQuestion && messages.length > 0;
+  const isWaitingForNextRound = !hasRetryAction && lastMessage?.role === 'assistant' && !lastMessage?.isQuestion && messages.length > 0;
 
   return (
     <div className={`flex h-full flex-col rounded-2xl border shadow-sm overflow-hidden transition-colors ${isDarkReadingMode ? 'border-slate-800 bg-slate-900' : 'border-gray-200 bg-white'}`}>
@@ -136,7 +140,17 @@ export function Chat({
       </div>
 
       <div className={`border-t p-4 ${isDarkReadingMode ? 'border-slate-800 bg-slate-950/40' : 'border-gray-100 bg-gray-50/50'}`}>
-        {isWaitingForNextRound ? (
+        {hasRetryAction ? (
+          <button
+            onClick={onRetry}
+            disabled={isGenerating}
+            className="flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-3 text-white transition-colors hover:bg-indigo-700 disabled:opacity-50 shadow-sm"
+            title="Retry"
+            aria-label="Retry"
+          >
+            <RefreshCw className="h-5 w-5" />
+          </button>
+        ) : isWaitingForNextRound ? (
           <button
             onClick={onNextRound}
             disabled={isGenerating}
