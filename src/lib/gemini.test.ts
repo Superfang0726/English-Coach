@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   buildQuestionGenerationPrompt,
   formatQuestionsForMarkdown,
+  normalizeVocabularySuggestions,
   type GeneratedQuestion,
 } from './gemini.ts';
 
@@ -35,5 +36,18 @@ const prompt = buildQuestionGenerationPrompt(
 
 assert.match(prompt, /出 1 題單選題/);
 assert.doesNotMatch(prompt, /出 2 題單選題/);
+
+assert.deepEqual(
+  normalizeVocabularySuggestions([
+    { word: 'recession', meaning: '經濟衰退', level: 'X' },
+    { word: 'curtail', meaning: '縮減', level: '^' },
+    { word: 'invalid', meaning: '無效', level: 'bad' },
+    { word: '   ', meaning: '空白', level: 'X' },
+  ]),
+  [
+    { word: 'recession', meaning: '經濟衰退', level: 'X' },
+    { word: 'curtail', meaning: '縮減', level: '^' },
+  ]
+);
 
 console.log('gemini formatting tests passed');

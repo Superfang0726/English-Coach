@@ -19,6 +19,14 @@ export type GeneratedQuestionPayload = {
   questions: GeneratedQuestion[];
 };
 
+export type VocabularyLevel = 'O' | '^' | 'X';
+
+export type SuggestedVocabularyAddition = {
+  word: string;
+  meaning: string;
+  level: VocabularyLevel;
+};
+
 const SYSTEM_PROMPT = `
 # Role: TOEIC 單字訓練教練 (Dynamic Risk Management Mode)
 
@@ -46,12 +54,12 @@ const SYSTEM_PROMPT = `
 `;
 
 function withCooldown(vocab: any[], currentRound: number) {
-  return vocab.map(v => {
+  return vocab.map((v) => {
     const roundsSinceTested = currentRound - v.lastTestedRound;
     const isCoolingDown = v.lastTestedRound > 0 && roundsSinceTested < 3;
     return {
       ...v,
-      isCoolingDown
+      isCoolingDown,
     };
   });
 }
@@ -87,6 +95,32 @@ function normalizeQuestions(rawQuestions: unknown): GeneratedQuestion[] {
       targetWord: toText(q.targetWord),
     };
   });
+}
+
+function isVocabularyLevel(value: unknown): value is VocabularyLevel {
+  return value === 'O' || value === '^' || value === 'X';
+}
+
+export function normalizeVocabularySuggestions(rawSuggestions: unknown): SuggestedVocabularyAddition[] {
+  if (!Array.isArray(rawSuggestions)) return [];
+
+  const seen = new Set<string>();
+  const suggestions: SuggestedVocabularyAddition[] = [];
+
+  rawSuggestions.forEach((suggestion) => {
+    const item = suggestion as Partial<SuggestedVocabularyAddition>;
+    const word = toText(item.word);
+    const meaning = toText(item.meaning);
+    const level = item.level;
+    const key = word.toLowerCase();
+
+    if (!word || !meaning || !isVocabularyLevel(level) || seen.has(key)) return;
+
+    seen.add(key);
+    suggestions.push({ word, meaning, level });
+  });
+
+  return suggestions;
 }
 
 export function formatQuestionsForMarkdown(questions: GeneratedQuestion[]) {
@@ -126,7 +160,12 @@ ${JSON.stringify(vocabWithCooldown)}
 `;
 }
 
-export async function generateQuestions(vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-3.1-flash-lite-preview'): Promise<GeneratedQuestionPayload> {
+export async function generateQuestions(
+  vocab: any[],
+  currentRound: number,
+  apiKey: string,
+  modelName: string = 'gemini-3.1-flash-lite-preview'
+): Promise<GeneratedQuestionPayload> {
   const ai = new GoogleGenAI({ apiKey });
   const prompt = buildQuestionGenerationPrompt(vocab, currentRound);
 
@@ -161,21 +200,21 @@ export async function generateQuestions(vocab: any[], currentRound: number, apiK
                         A: { type: Type.STRING },
                         B: { type: Type.STRING },
                         C: { type: Type.STRING },
-                        D: { type: Type.STRING }
+                        D: { type: Type.STRING },
                       },
-                      required: ['A', 'B', 'C', 'D']
+                      required: ['A', 'B', 'C', 'D'],
                     },
-                    targetWord: { type: Type.STRING }
+                    targetWord: { type: Type.STRING },
                   },
-                  required: ['number', 'stem', 'choices', 'targetWord']
-                }
-              }
+                  required: ['number', 'stem', 'choices', 'targetWord'],
+                },
+              },
             },
-            required: ['questions']
-          }
-        }
+            required: ['questions'],
+          },
+        },
       }),
-      timeoutPromise
+      timeoutPromise,
     ]) as any;
 
     console.log('[Gemini] Response received:', response.text?.substring(0, 200));
@@ -192,14 +231,20 @@ export async function generateQuestions(vocab: any[], currentRound: number, apiK
     console.error('[Gemini] Error status:', error?.status);
     console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
 
-    // Ensure the status is attached to the thrown error block
     if (error?.status && !error.status) error.status = error.status;
 
     throw error;
   }
 }
 
-export async function evaluateAnswers(questions: string, userAnswer: string, vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-3.1-flash-lite-preview') {
+export async function evaluateAnswers(
+  questions: string,
+  userAnswer: string,
+  vocab: any[],
+  currentRound: number,
+  apiKey: string,
+  modelName: string = 'gemini-3.1-flash-lite-preview'
+) {
   const ai = new GoogleGenAI({ apiKey });
   const vocabWithCooldown = withCooldown(vocab, currentRound);
 
@@ -221,11 +266,12 @@ ${JSON.stringify(vocabWithCooldown)}
 2. 答錯或猶豫：降級 (O -> ^, 或 ^ -> X)。
 3. 已經是 O 區且答對，保持 O 區；已經是 X 區且答錯，保持 X 區。
 
-請呼叫 \`update_vocabulary_levels\` 函式來回報評估結果，包含給使用者的回饋、需要更新級別的單字，以及本次作為主考題的單字。
+請呼叫 \`update_vocabulary_levels\` 函式來回報評估結果，包含給使用者的回饋、需要更新級別的單字、本次作為主考題的單字，以及 AI 建議新增到訓練資料庫的單字。
 【注意事項】：
 - updates 裡的 word 必須與單字庫中的拼字完全一致（純單字，不可加上後綴字元，例如 "-to-^"）。
 - testedWords 是本次作為主考題的單字陣列（純字串陣列，拼字必須完全一致）。
 - message 是給使用者的解析與回饋（ Markdown 格式，明確告知哪些單字升降級）。
+- suggestedAdditions 是 AI 認為有需要詢問使用者是否新增的單字陣列；可以一次回傳多個。每個項目必須包含 word、meaning、level。meaning 請輸出繁體中文意思；level 只能是 "O", "^", "X"。如果是未知、不熟、答錯或錯選造成的新增建議，通常標記為 "X"。
 `;
 
   try {
@@ -242,63 +288,80 @@ ${JSON.stringify(vocabWithCooldown)}
           tools: [{
             functionDeclarations: [{
               name: 'update_vocabulary_levels',
-              description: 'Report the evaluation result, including user feedback, vocabulary level updates, and tested words.',
+              description: 'Report the evaluation result, vocabulary level updates, tested words, and optional new vocabulary suggestions.',
               parameters: {
                 type: Type.OBJECT,
                 properties: {
                   message: {
                     type: Type.STRING,
-                    description: '給使用者的解析與回饋（Markdown 格式，請在回饋中明確告知哪些單字升級或降級了）'
+                    description: 'Markdown feedback shown to the user.',
                   },
                   updates: {
                     type: Type.ARRAY,
-                    description: '需要更新級別的單字陣列。若無變動可傳空陣列。',
+                    description: 'Level updates for words that already exist in the vocabulary database.',
                     items: {
                       type: Type.OBJECT,
                       properties: {
-                        word: { type: Type.STRING, description: '必須與單字庫中的拼字完全一致。' },
-                        newLevel: { type: Type.STRING, description: '更新後的級別字串，只能是 "O", "^", "X" 其中之一。' }
+                        word: { type: Type.STRING, description: 'Existing vocabulary word.' },
+                        newLevel: { type: Type.STRING, description: 'Updated familiarity level. Must be "O", "^", or "X".' },
                       },
-                      required: ['word', 'newLevel']
-                    }
+                      required: ['word', 'newLevel'],
+                    },
                   },
                   testedWords: {
                     type: Type.ARRAY,
-                    description: '本次作為主考題的單字陣列',
-                    items: { type: Type.STRING }
-                  }
+                    description: 'Target vocabulary words tested in this round.',
+                    items: { type: Type.STRING },
+                  },
+                  suggestedAdditions: {
+                    type: Type.ARRAY,
+                    description: 'Vocabulary words the app should ask the user whether to add. Return multiple items when needed.',
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        word: { type: Type.STRING, description: 'English vocabulary word to add.' },
+                        meaning: { type: Type.STRING, description: 'Traditional Chinese meaning.' },
+                        level: { type: Type.STRING, description: 'Initial familiarity level. Must be "O", "^", or "X". Use "X" for unknown or unfamiliar words.' },
+                      },
+                      required: ['word', 'meaning', 'level'],
+                    },
+                  },
                 },
-                required: ['message', 'updates', 'testedWords']
-              }
-            }]
-          }]
-        }
+                required: ['message', 'updates', 'testedWords', 'suggestedAdditions'],
+              },
+            }],
+          }],
+        },
       }),
-      timeoutPromise
+      timeoutPromise,
     ]) as any;
 
     let result = {
-      message: response.text || '解析完成。',
-      updates: [],
-      testedWords: []
+      message: response.text || '評估完成。',
+      updates: [] as any[],
+      testedWords: [] as string[],
+      suggestedAdditions: [] as SuggestedVocabularyAddition[],
     };
 
-    // Extract tool calls from the response if any
-    const functionCall = response.functionCalls?.[0];
-    if (functionCall && functionCall.name === 'update_vocabulary_levels') {
+    const functionCall = response.functionCalls?.find(
+      (call: any) => call.name === 'update_vocabulary_levels'
+    );
+
+    if (functionCall) {
       const args = functionCall.args as any;
       result.message = args.message || result.message;
-      result.updates = args.updates || [];
-      result.testedWords = args.testedWords || [];
+      result.updates = Array.isArray(args.updates) ? args.updates : [];
+      result.testedWords = Array.isArray(args.testedWords) ? args.testedWords : [];
+      result.suggestedAdditions = normalizeVocabularySuggestions(args.suggestedAdditions);
     } else {
-      // Fallback: If no function call, check if the model still generated JSON
       try {
         const parsed = JSON.parse(response.text!);
-        if (parsed.updates) result.updates = parsed.updates;
-        if (parsed.testedWords) result.testedWords = parsed.testedWords;
         if (parsed.message) result.message = parsed.message;
+        if (Array.isArray(parsed.updates)) result.updates = parsed.updates;
+        if (Array.isArray(parsed.testedWords)) result.testedWords = parsed.testedWords;
+        result.suggestedAdditions = normalizeVocabularySuggestions(parsed.suggestedAdditions);
       } catch (e) {
-        // Not a JSON response, fallback to plain text message
+        // Not a JSON response, fallback to plain text message.
       }
     }
 
@@ -313,7 +376,6 @@ ${JSON.stringify(vocabWithCooldown)}
     console.error('[Gemini] Error status:', error?.status);
     console.error('[Gemini] Error details:', JSON.stringify(error?.errorDetails || error?.response?.data, null, 2));
 
-    // Ensure the status is attached to the thrown error block
     if (error?.status && !error.status) error.status = error.status;
 
     throw error;

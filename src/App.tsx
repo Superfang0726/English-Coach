@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Chat, Message } from './components/Chat';
 import { VocabTable } from './components/VocabTable';
-import { generateQuestions, evaluateAnswers, formatQuestionsForMarkdown } from './lib/gemini';
+import { generateQuestions, evaluateAnswers, formatQuestionsForMarkdown, type SuggestedVocabularyAddition } from './lib/gemini';
 import { DARK_READING_MODE_STORAGE_KEY, parseDarkReadingModePreference } from './lib/readingMode';
-import { BookOpen, RefreshCw, Download, Settings, PanelRightClose, PanelRightOpen, Moon, Sun } from 'lucide-react';
+import { BookOpen, RefreshCw, Download, Settings, PanelRightClose, PanelRightOpen, Moon, Sun, Check, X } from 'lucide-react';
 
 type VocabItem = {
   word: string;
@@ -28,6 +28,7 @@ export default function App() {
   const [modelName, setModelName] = useState(DEFAULT_MODEL_NAME);
   const [isVocabPanelCollapsed, setIsVocabPanelCollapsed] = useState(false);
   const [isDarkReadingMode, setIsDarkReadingMode] = useState(false);
+  const [pendingVocabularySuggestions, setPendingVocabularySuggestions] = useState<SuggestedVocabularyAddition[]>([]);
   const generationIdRef = React.useRef(0);
 
   // Load initial data
@@ -100,9 +101,46 @@ export default function App() {
   }, [isLoading, messages.length, vocab.length, isGenerating]);
 
   const handleAddWord = async (word: string, meaning: string, level: string) => {
-    const newVocab = [...vocab, { word, meaning, level, lastTestedRound: 0 }];
+    const cleanWord = word.trim();
+    if (!cleanWord || vocab.some((v) => v.word.trim().toLowerCase() === cleanWord.toLowerCase())) return;
+
+    const newVocab = [...vocab, { word: cleanWord, meaning: meaning.trim(), level, lastTestedRound: 0 }];
     setVocab(newVocab);
     await saveVocabToBackend(newVocab);
+  };
+
+  const enqueueVocabularySuggestions = (
+    suggestions: SuggestedVocabularyAddition[] | undefined,
+    currentVocab: VocabItem[]
+  ) => {
+    if (!suggestions?.length) return;
+
+    setPendingVocabularySuggestions((current) => {
+      const knownWords = new Set([
+        ...currentVocab.map((item) => item.word.trim().toLowerCase()),
+        ...current.map((item) => item.word.trim().toLowerCase()),
+      ]);
+      const additions = suggestions.filter((suggestion) => {
+        const key = suggestion.word.trim().toLowerCase();
+        if (!key || knownWords.has(key)) return false;
+        knownWords.add(key);
+        return true;
+      });
+
+      return [...current, ...additions];
+    });
+  };
+
+  const handleAcceptVocabularySuggestion = async () => {
+    const suggestion = pendingVocabularySuggestions[0];
+    if (!suggestion) return;
+
+    await handleAddWord(suggestion.word, suggestion.meaning, suggestion.level);
+    setPendingVocabularySuggestions((current) => current.slice(1));
+  };
+
+  const handleRejectVocabularySuggestion = () => {
+    setPendingVocabularySuggestions((current) => current.slice(1));
   };
 
   const handleDeleteWord = async (wordToDelete: string) => {
@@ -276,6 +314,7 @@ export default function App() {
 
       setVocab(updatedVocab);
       await saveVocabToBackend(updatedVocab);
+      enqueueVocabularySuggestions(result.suggestedAdditions, updatedVocab);
 
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -328,6 +367,8 @@ export default function App() {
     localStorage.removeItem('toeic_current_round');
     setShowResetConfirm(false);
   };
+
+  const currentVocabularySuggestion = pendingVocabularySuggestions[0];
 
   if (isLoading) {
     return (
@@ -404,7 +445,7 @@ export default function App() {
               </button>
             )}
           </div>
-          <div className="flex-1 overflow-hidden">
+          <div className="relative flex-1 overflow-hidden">
             <Chat
               messages={messages}
               isGenerating={isGenerating}
@@ -412,6 +453,52 @@ export default function App() {
               onNextRound={handleNextRound}
               isDarkReadingMode={isDarkReadingMode}
             />
+            {currentVocabularySuggestion && (
+              <div className="pointer-events-none absolute inset-x-4 bottom-4 z-20 flex justify-center">
+                <div className={`pointer-events-auto w-full max-w-md rounded-xl border p-4 shadow-2xl backdrop-blur ${isDarkReadingMode ? 'border-slate-700 bg-slate-900/95 text-slate-100' : 'border-indigo-100 bg-white/95 text-gray-900'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={`text-xs font-semibold uppercase tracking-wide ${isDarkReadingMode ? 'text-indigo-300' : 'text-indigo-600'}`}>
+                        AI 建議新增單字
+                      </p>
+                      <h3 className={`mt-1 break-words text-lg font-bold ${isDarkReadingMode ? 'text-slate-50' : 'text-gray-950'}`}>
+                        {currentVocabularySuggestion.word}
+                      </h3>
+                    </div>
+                    <span className={`shrink-0 rounded-md border px-2 py-1 text-xs font-semibold ${currentVocabularySuggestion.level === 'X'
+                      ? isDarkReadingMode ? 'border-rose-500/40 bg-rose-500/15 text-rose-200' : 'border-rose-200 bg-rose-50 text-rose-700'
+                      : currentVocabularySuggestion.level === '^'
+                        ? isDarkReadingMode ? 'border-amber-500/40 bg-amber-500/15 text-amber-200' : 'border-amber-200 bg-amber-50 text-amber-700'
+                        : isDarkReadingMode ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      }`}>
+                      {currentVocabularySuggestion.level}
+                    </span>
+                  </div>
+                  <p className={`mt-2 break-words text-sm ${isDarkReadingMode ? 'text-slate-300' : 'text-gray-600'}`}>
+                    {currentVocabularySuggestion.meaning}
+                  </p>
+                  <p className={`mt-2 text-xs ${isDarkReadingMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    要加入到 Vocabulary Database 嗎？{pendingVocabularySuggestions.length > 1 ? `還有 ${pendingVocabularySuggestions.length - 1} 個建議等待確認。` : ''}
+                  </p>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleRejectVocabularySuggestion}
+                      className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${isDarkReadingMode ? 'border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      <X className="h-4 w-4" />
+                      <span>否</span>
+                    </button>
+                    <button
+                      onClick={handleAcceptVocabularySuggestion}
+                      className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+                    >
+                      <Check className="h-4 w-4" />
+                      <span>是，加入</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
