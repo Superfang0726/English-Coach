@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Chat, Message } from './components/Chat';
 import { VocabTable } from './components/VocabTable';
-import { generateQuestions, evaluateAnswers } from './lib/gemini';
-import { BookOpen, RefreshCw, Download, Upload, Settings, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { generateQuestions, evaluateAnswers, formatQuestionsForMarkdown } from './lib/gemini';
+import { DARK_READING_MODE_STORAGE_KEY, parseDarkReadingModePreference } from './lib/readingMode';
+import { BookOpen, RefreshCw, Download, Settings, PanelRightClose, PanelRightOpen, Moon, Sun } from 'lucide-react';
 
 type VocabItem = {
   word: string;
@@ -26,6 +27,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [modelName, setModelName] = useState(DEFAULT_MODEL_NAME);
   const [isVocabPanelCollapsed, setIsVocabPanelCollapsed] = useState(false);
+  const [isDarkReadingMode, setIsDarkReadingMode] = useState(false);
   const generationIdRef = React.useRef(0);
 
   // Load initial data
@@ -45,9 +47,11 @@ export default function App() {
         const savedRound = localStorage.getItem('toeic_current_round');
         const savedApiKey = localStorage.getItem('gemini_api_key');
         const savedModelName = localStorage.getItem('gemini_model_name');
+        const savedDarkReadingMode = localStorage.getItem(DARK_READING_MODE_STORAGE_KEY);
 
         if (savedMessages) setMessages(JSON.parse(savedMessages));
         if (savedRound) setCurrentRound(parseInt(savedRound, 10));
+        setIsDarkReadingMode(parseDarkReadingModePreference(savedDarkReadingMode));
         if (savedModelName && AVAILABLE_MODELS.includes(savedModelName)) {
           setModelName(savedModelName);
         } else {
@@ -75,8 +79,9 @@ export default function App() {
       localStorage.setItem('toeic_current_round', currentRound.toString());
       localStorage.setItem('gemini_api_key', apiKey);
       localStorage.setItem('gemini_model_name', modelName);
+      localStorage.setItem(DARK_READING_MODE_STORAGE_KEY, String(isDarkReadingMode));
     }
-  }, [messages, currentRound, isLoading, apiKey, modelName]);
+  }, [messages, currentRound, isLoading, apiKey, modelName, isDarkReadingMode]);
 
   // Handle initial question generation or empty state
   useEffect(() => {
@@ -147,12 +152,13 @@ export default function App() {
     const currentGenId = ++generationIdRef.current;
     const roundToUse = roundOverride ?? currentRound;
     try {
-      const questionText = await generateQuestions(vocab, roundToUse, apiKey, modelName);
+      const questionPayload = await generateQuestions(vocab, roundToUse, apiKey, modelName);
       if (currentGenId !== generationIdRef.current) return;
       const newMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: questionText,
+        content: questionPayload.message,
+        questions: questionPayload.questions,
         isQuestion: true,
       };
       setMessages((prev) => [...prev, newMessage]);
@@ -205,7 +211,10 @@ export default function App() {
 
     try {
       // Find the last question
-      const lastQuestion = [...messages].reverse().find((m) => m.isQuestion)?.content || '';
+      const lastQuestionMessage = [...messages].reverse().find((m) => m.isQuestion);
+      const lastQuestion = lastQuestionMessage?.questions?.length
+        ? formatQuestionsForMarkdown(lastQuestionMessage.questions)
+        : lastQuestionMessage?.content || '';
 
       const result = await evaluateAnswers(lastQuestion, userAnswer, vocab, currentRound, apiKey, modelName);
       if (currentGenId !== generationIdRef.current) return;
@@ -329,41 +338,50 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-gray-50 font-sans text-gray-900">
-      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
+    <div className={`flex h-screen flex-col font-sans transition-colors ${isDarkReadingMode ? 'bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-900'}`}>
+      <header className={`flex items-center justify-between border-b px-6 py-4 shadow-sm transition-colors ${isDarkReadingMode ? 'border-slate-800 bg-slate-900' : 'border-gray-200 bg-white'}`}>
         <div className="flex items-center space-x-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${isDarkReadingMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>
             <BookOpen className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-gray-900">TOEIC Coach</h1>
-            <p className="text-xs font-medium text-gray-500">Dynamic Risk Management Mode</p>
+            <h1 className={`text-xl font-bold tracking-tight ${isDarkReadingMode ? 'text-slate-50' : 'text-gray-900'}`}>TOEIC Coach</h1>
+            <p className={`text-xs font-medium ${isDarkReadingMode ? 'text-slate-400' : 'text-gray-500'}`}>Dynamic Risk Management Mode</p>
           </div>
         </div>
         <div className="flex items-center space-x-4">
           <a
             href="/api/vocab/download"
-            className="flex items-center space-x-2 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700 transition-colors hover:bg-green-100 shadow-sm"
+            className={`flex items-center space-x-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors shadow-sm ${isDarkReadingMode ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20' : 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'}`}
           >
             <Download className="h-4 w-4" />
             <span>Download Excel</span>
           </a>
-          <div className="flex items-center space-x-2 rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-600">
+          <div className={`flex items-center space-x-2 rounded-lg px-3 py-1.5 text-sm font-medium ${isDarkReadingMode ? 'bg-slate-800 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
             <span>Round</span>
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white text-indigo-600 shadow-sm">
+            <span className={`flex h-6 w-6 items-center justify-center rounded-md shadow-sm ${isDarkReadingMode ? 'bg-slate-700 text-indigo-200' : 'bg-white text-indigo-600'}`}>
               {currentRound}
             </span>
           </div>
           <button
+            onClick={() => setIsDarkReadingMode((current) => !current)}
+            aria-pressed={isDarkReadingMode}
+            className={`flex items-center space-x-2 rounded-lg border px-3 py-1.5 text-sm font-medium shadow-sm transition-colors ${isDarkReadingMode ? 'border-amber-400/30 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
+            title={isDarkReadingMode ? 'Switch to light reading mode' : 'Switch to dark reading mode'}
+          >
+            {isDarkReadingMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <span>{isDarkReadingMode ? 'Light Read' : 'Dark Read'}</span>
+          </button>
+          <button
             onClick={handleReset}
-            className="flex items-center space-x-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 shadow-sm"
+            className={`flex items-center space-x-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors shadow-sm ${isDarkReadingMode ? 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-50' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
           >
             <RefreshCw className="h-4 w-4" />
             <span>Reset Chat</span>
           </button>
           <button
             onClick={() => setShowSettings(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 shadow-sm"
+            className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-colors shadow-sm ${isDarkReadingMode ? 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-50' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
             title="Settings"
           >
             <Settings className="h-4 w-4" />
@@ -374,11 +392,11 @@ export default function App() {
       <main className="flex flex-1 overflow-hidden p-6 gap-6">
         <div className={`flex min-w-0 flex-col transition-all duration-200 ${isVocabPanelCollapsed ? 'w-full' : 'w-1/2'}`}>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-800">Training Session</h2>
+            <h2 className={`text-lg font-semibold ${isDarkReadingMode ? 'text-slate-100' : 'text-gray-800'}`}>Training Session</h2>
             {isVocabPanelCollapsed && (
               <button
                 onClick={() => setIsVocabPanelCollapsed(false)}
-                className="flex items-center space-x-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900"
+                className={`flex items-center space-x-2 rounded-lg border px-3 py-1.5 text-sm font-medium shadow-sm transition-colors ${isDarkReadingMode ? 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-50' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
                 title="Show vocabulary database"
               >
                 <PanelRightOpen className="h-4 w-4" />
@@ -392,6 +410,7 @@ export default function App() {
               isGenerating={isGenerating}
               onSendMessage={handleSendMessage}
               onNextRound={handleNextRound}
+              isDarkReadingMode={isDarkReadingMode}
             />
           </div>
         </div>
@@ -399,20 +418,20 @@ export default function App() {
         {!isVocabPanelCollapsed && (
           <div className="flex min-w-0 w-1/2 flex-col transition-all duration-200">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-800">Vocabulary Database</h2>
+              <h2 className={`text-lg font-semibold ${isDarkReadingMode ? 'text-slate-100' : 'text-gray-800'}`}>Vocabulary Database</h2>
               <div className="flex flex-wrap items-center justify-end gap-2">
-              <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${isDarkReadingMode ? 'bg-emerald-500/15 text-emerald-200' : 'bg-green-100 text-green-800'}`}>
                 🟢 O: {vocab.filter((v) => v.level === 'O').length}
               </span>
-              <span className="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800">
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${isDarkReadingMode ? 'bg-amber-500/15 text-amber-200' : 'bg-yellow-100 text-yellow-800'}`}>
                 🟡 ^: {vocab.filter((v) => v.level === '^').length}
               </span>
-              <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${isDarkReadingMode ? 'bg-rose-500/15 text-rose-200' : 'bg-red-100 text-red-800'}`}>
                 🔴 X: {vocab.filter((v) => v.level === 'X').length}
               </span>
               <button
                 onClick={() => setIsVocabPanelCollapsed(true)}
-                className="flex shrink-0 items-center space-x-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900"
+                className={`flex shrink-0 items-center space-x-2 rounded-lg border px-3 py-1.5 text-sm font-medium shadow-sm transition-colors ${isDarkReadingMode ? 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-50' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
                 title="Hide vocabulary database"
               >
                 <PanelRightClose className="h-4 w-4" />
@@ -427,6 +446,7 @@ export default function App() {
                 currentRound={currentRound}
                 onAddWord={handleAddWord}
                 onDeleteWord={handleDeleteWord}
+                isDarkReadingMode={isDarkReadingMode}
               />
             </div>
           </div>
@@ -436,15 +456,15 @@ export default function App() {
 
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-bold text-gray-900">Reset Chat History</h3>
-            <p className="mt-2 text-sm text-gray-500">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${isDarkReadingMode ? 'bg-slate-900 text-slate-100' : 'bg-white'}`}>
+            <h3 className={`text-lg font-bold ${isDarkReadingMode ? 'text-slate-50' : 'text-gray-900'}`}>Reset Chat History</h3>
+            <p className={`mt-2 text-sm ${isDarkReadingMode ? 'text-slate-400' : 'text-gray-500'}`}>
               Are you sure you want to reset the chat history? This will start a new session from Round 1. Your vocabulary progress will be kept.
             </p>
             <div className="mt-6 flex justify-end space-x-3">
               <button
                 onClick={() => setShowResetConfirm(false)}
-                className="rounded-xl px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+                className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors ${isDarkReadingMode ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-600 hover:bg-gray-100'}`}
               >
                 Cancel
               </button>
@@ -461,19 +481,19 @@ export default function App() {
 
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${isDarkReadingMode ? 'bg-slate-900 text-slate-100' : 'bg-white'}`}>
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-900">Settings</h3>
+              <h3 className={`text-lg font-bold ${isDarkReadingMode ? 'text-slate-50' : 'text-gray-900'}`}>Settings</h3>
               <button
                 onClick={() => setShowSettings(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className={isDarkReadingMode ? 'text-slate-500 hover:text-slate-200' : 'text-gray-400 hover:text-gray-600'}
               >
                 ✕
               </button>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${isDarkReadingMode ? 'text-slate-200' : 'text-gray-700'}`}>
                   Gemini API Key{" "}
                   <a
                     href="https://aistudio.google.com/apikey"
@@ -489,26 +509,26 @@ export default function App() {
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="Enter your Gemini API key"
-                  className="w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className={`w-full rounded-xl border px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${isDarkReadingMode ? 'border-slate-700 bg-slate-950 text-slate-100 placeholder:text-slate-500' : 'border-gray-200 bg-white'}`}
                 />
-                <p className="mt-1 text-xs text-gray-500">
+                <p className={`mt-1 text-xs ${isDarkReadingMode ? 'text-slate-400' : 'text-gray-500'}`}>
                   Your API key is stored locally in your browser.
                 </p>
               </div>
               <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${isDarkReadingMode ? 'text-slate-200' : 'text-gray-700'}`}>
                   Gemini Model
                 </label>
                 <select
                   value={modelName}
                   onChange={(e) => setModelName(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                  className={`w-full rounded-xl border px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${isDarkReadingMode ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-gray-200 bg-white'}`}
                 >
                   {AVAILABLE_MODELS.map((model) => (
                     <option key={model} value={model}>{model}</option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className={`mt-1 text-xs ${isDarkReadingMode ? 'text-slate-400' : 'text-gray-500'}`}>
                   Select which model variant to use.
                 </p>
               </div>

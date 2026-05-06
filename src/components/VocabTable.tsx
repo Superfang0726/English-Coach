@@ -14,12 +14,19 @@ interface VocabTableProps {
   currentRound: number;
   onAddWord: (word: string, meaning: string, level: string) => void;
   onDeleteWord: (word: string) => void;
+  isDarkReadingMode?: boolean;
 }
 
 type SortField = 'level' | 'lastTestedRound' | null;
 type SortDirection = 'asc' | 'desc';
 
-export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: VocabTableProps) {
+export function VocabTable({
+  vocab,
+  currentRound,
+  onAddWord,
+  onDeleteWord,
+  isDarkReadingMode = false,
+}: VocabTableProps) {
   const [newWord, setNewWord] = useState('');
   const [newMeaning, setNewMeaning] = useState('');
   const [newLevel, setNewLevel] = useState('X');
@@ -85,6 +92,15 @@ export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: Voc
   }, [vocab, sortField, sortDirection]);
 
   const getLevelColor = (level: string) => {
+    if (isDarkReadingMode) {
+      switch (level) {
+        case 'O': return 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30';
+        case '^': return 'bg-amber-500/15 text-amber-200 border-amber-500/30';
+        case 'X': return 'bg-rose-500/15 text-rose-200 border-rose-500/30';
+        default: return 'bg-slate-700 text-slate-200 border-slate-600';
+      }
+    }
+
     switch (level) {
       case 'O': return 'bg-green-100 text-green-800 border-green-200';
       case '^': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
@@ -94,20 +110,20 @@ export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: Voc
   };
 
   const renderSortIcon = (field: SortField) => {
-    if (sortField !== field) return <ArrowUpDown className="h-4 w-4 text-gray-400" />;
+    if (sortField !== field) return <ArrowUpDown className={`h-4 w-4 ${isDarkReadingMode ? 'text-slate-500' : 'text-gray-400'}`} />;
     return sortDirection === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
   };
 
   return (
     <div className="flex flex-col h-full space-y-4">
       <div className="flex flex-col gap-2">
-        <form onSubmit={handleAdd} className="flex gap-2 bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+        <form onSubmit={handleAdd} className={`flex gap-2 p-3 rounded-xl border shadow-sm ${isDarkReadingMode ? 'border-slate-800 bg-slate-900' : 'border-gray-200 bg-white'}`}>
           <input
             type="text"
             placeholder="Word"
             value={newWord}
             onChange={(e) => setNewWord(e.target.value)}
-            className="flex-1 rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+            className={`flex-1 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border ${isDarkReadingMode ? 'border-slate-700 bg-slate-950 text-slate-100 placeholder:text-slate-500' : 'border-gray-300 bg-white'}`}
             required
           />
           <input
@@ -115,13 +131,13 @@ export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: Voc
             placeholder="Meaning"
             value={newMeaning}
             onChange={(e) => setNewMeaning(e.target.value)}
-            className="flex-1 rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+            className={`flex-1 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border ${isDarkReadingMode ? 'border-slate-700 bg-slate-950 text-slate-100 placeholder:text-slate-500' : 'border-gray-300 bg-white'}`}
             required
           />
           <select
             value={newLevel}
             onChange={(e) => setNewLevel(e.target.value)}
-            className="rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+            className={`rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border ${isDarkReadingMode ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-gray-300 bg-white'}`}
           >
             <option value="X">🔴 X 區</option>
             <option value="^">🟡 ^ 區</option>
@@ -136,20 +152,20 @@ export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: Voc
           </button>
         </form>
         {errorMessage && (
-          <div className="text-red-500 text-sm px-2 font-medium">
+          <div className={`${isDarkReadingMode ? 'text-rose-300' : 'text-red-500'} text-sm px-2 font-medium`}>
             {errorMessage}
           </div>
         )}
       </div>
 
-      <div className="flex-1 overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm text-gray-600">
-          <thead className="bg-gray-50 text-xs uppercase text-gray-700 sticky top-0 z-10">
+      <div className={`flex-1 overflow-auto rounded-xl border shadow-sm ${isDarkReadingMode ? 'border-slate-800 bg-slate-900' : 'border-gray-200 bg-white'}`}>
+        <table className={`w-full text-left text-sm ${isDarkReadingMode ? 'text-slate-300' : 'text-gray-600'}`}>
+          <thead className={`${isDarkReadingMode ? 'bg-slate-950 text-slate-300' : 'bg-gray-50 text-gray-700'} text-xs uppercase sticky top-0 z-10`}>
             <tr>
               <th className="px-6 py-3 font-medium">Word</th>
               <th className="px-6 py-3 font-medium">Meaning</th>
               <th 
-                className="px-6 py-3 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
+                className={`px-6 py-3 font-medium cursor-pointer transition-colors ${isDarkReadingMode ? 'hover:bg-slate-800' : 'hover:bg-gray-100'}`}
                 onClick={() => handleSort('level')}
               >
                 <div className="flex items-center space-x-1">
@@ -158,7 +174,7 @@ export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: Voc
                 </div>
               </th>
               <th 
-                className="px-6 py-3 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
+                className={`px-6 py-3 font-medium cursor-pointer transition-colors ${isDarkReadingMode ? 'hover:bg-slate-800' : 'hover:bg-gray-100'}`}
                 onClick={() => handleSort('lastTestedRound')}
               >
                 <div className="flex items-center space-x-1">
@@ -169,31 +185,31 @@ export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: Voc
               <th className="px-6 py-3 font-medium text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className={`${isDarkReadingMode ? 'divide-y divide-slate-800' : 'divide-y divide-gray-200'}`}>
             {sortedVocab.map((item, index) => {
               const roundsSinceTested = currentRound - item.lastTestedRound;
               const isCoolingDown = item.lastTestedRound > 0 && roundsSinceTested < 3;
               const cooldownText = isCoolingDown ? `(Cooldown: ${3 - roundsSinceTested} rounds left)` : '(Ready)';
 
               return (
-                <tr key={index} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 font-medium text-gray-900">{item.word}</td>
+                <tr key={index} className={`transition-colors ${isDarkReadingMode ? 'hover:bg-slate-800/70' : 'hover:bg-gray-50'}`}>
+                  <td className={`px-6 py-4 font-medium ${isDarkReadingMode ? 'text-slate-100' : 'text-gray-900'}`}>{item.word}</td>
                   <td className="px-6 py-4">{item.meaning}</td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${getLevelColor(item.level)}`}>
                       {item.level}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-500">
+                  <td className={`px-6 py-4 ${isDarkReadingMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     <div>Round {item.lastTestedRound}</div>
-                    <div className={`text-xs ${isCoolingDown ? 'text-orange-500' : 'text-green-500'}`}>
+                    <div className={`text-xs ${isCoolingDown ? (isDarkReadingMode ? 'text-amber-300' : 'text-orange-500') : (isDarkReadingMode ? 'text-emerald-300' : 'text-green-500')}`}>
                       {item.lastTestedRound > 0 ? cooldownText : '(Ready)'}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button
                       onClick={() => onDeleteWord(item.word)}
-                      className="text-red-600 hover:text-red-900 p-1 rounded-md hover:bg-red-50 transition-colors"
+                      className={`p-1 rounded-md transition-colors ${isDarkReadingMode ? 'text-rose-300 hover:bg-rose-500/10 hover:text-rose-200' : 'text-red-600 hover:bg-red-50 hover:text-red-900'}`}
                       title="Delete word"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -204,7 +220,7 @@ export function VocabTable({ vocab, currentRound, onAddWord, onDeleteWord }: Voc
             })}
             {sortedVocab.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={5} className={`px-6 py-8 text-center ${isDarkReadingMode ? 'text-slate-400' : 'text-gray-500'}`}>
                   No vocabulary found. Add some words to get started.
                 </td>
               </tr>

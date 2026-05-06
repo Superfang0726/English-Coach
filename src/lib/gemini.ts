@@ -1,5 +1,24 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
+export const QUESTIONS_PER_ROUND = 1;
+
+export type GeneratedQuestion = {
+  number: number;
+  stem: string;
+  choices: {
+    A: string;
+    B: string;
+    C: string;
+    D: string;
+  };
+  targetWord: string;
+};
+
+export type GeneratedQuestionPayload = {
+  message: string;
+  questions: GeneratedQuestion[];
+};
+
 const SYSTEM_PROMPT = `
 # Role: TOEIC 單字訓練教練 (Dynamic Risk Management Mode)
 
@@ -16,18 +35,18 @@ const SYSTEM_PROMPT = `
 ## 二、 核心出題與管理規則
 1. 語境限定：僅出商業/職場/多益高頻語境。不出冷門義、不出拼字、不出純翻譯。句子需符合多益 Part 5 難度。
 2. 間隔重複 (Cooldown 機制)：我最近剛問過、剛測驗過、或剛升降級的單字，必須進入「冷卻期」，至少間隔 3-5 輪以上才能再次作為主考題出現。絕對不要連續考同一個字。
-3. 測驗模式：每次出 2 題單選題。題幹中需刻意埋入 1-2 個 O 區單字作為背景。
+3. 測驗模式：每次出 1 題單選題。題幹中需刻意埋入 1-2 個 O 區單字作為背景。
 4. 測驗後處理：我回覆選項後，請進行「錯誤診斷」，並根據我的表現動態更新單字級別，列出最新的變動狀態。
 5. 出題規定：檢查題目中是否有底線作為填入答案的空格
 
 ## 三、 輸出排版要求
 1. **絕對不要**使用 HTML 標籤（如 <br> 或 <br/>）。請一律使用 Markdown 的標準換行符號。
-2. 選擇題的各個選項（A, B, C, D）之間**必須換行**，讓每個選項獨立一行，方便閱讀。
+2. 出題時如果被要求回傳 questions JSON，請把題幹放在 stem，把 A、B、C、D 分別放在 choices 的四個欄位，不要把選項混進 stem。
+3. 解析與回饋訊息可以使用 Markdown；選擇題本身由前端固定排版。
 `;
 
-export async function generateQuestions(vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-3.1-flash-lite-preview') {
-  const ai = new GoogleGenAI({ apiKey });
-  const vocabWithCooldown = vocab.map(v => {
+function withCooldown(vocab: any[], currentRound: number) {
+  return vocab.map(v => {
     const roundsSinceTested = currentRound - v.lastTestedRound;
     const isCoolingDown = v.lastTestedRound > 0 && roundsSinceTested < 3;
     return {
@@ -35,17 +54,81 @@ export async function generateQuestions(vocab: any[], currentRound: number, apiK
       isCoolingDown
     };
   });
+}
 
-  const prompt = `
-請根據以下單字庫與規則，出 2 題單選題。
+function normalizeMessage(message: string) {
+  return message
+    .replace(/\\n/g, '\n')
+    .replace(/\r\n/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .trim();
+}
+
+function toText(value: unknown) {
+  return typeof value === 'string' ? normalizeMessage(value) : '';
+}
+
+function normalizeQuestions(rawQuestions: unknown): GeneratedQuestion[] {
+  if (!Array.isArray(rawQuestions)) return [];
+
+  return rawQuestions.slice(0, QUESTIONS_PER_ROUND).map((question, index) => {
+    const q = question as Partial<GeneratedQuestion>;
+    const choices = (q.choices || {}) as Partial<GeneratedQuestion['choices']>;
+
+    return {
+      number: Number(q.number) || index + 1,
+      stem: toText(q.stem),
+      choices: {
+        A: toText(choices.A),
+        B: toText(choices.B),
+        C: toText(choices.C),
+        D: toText(choices.D),
+      },
+      targetWord: toText(q.targetWord),
+    };
+  });
+}
+
+export function formatQuestionsForMarkdown(questions: GeneratedQuestion[]) {
+  return questions
+    .map((question, index) => {
+      const number = question.number || index + 1;
+      return [
+        `${number}. ${question.stem}`,
+        `A. ${question.choices.A}`,
+        `B. ${question.choices.B}`,
+        `C. ${question.choices.C}`,
+        `D. ${question.choices.D}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+}
+
+export function buildQuestionGenerationPrompt(vocab: any[], currentRound: number) {
+  const vocabWithCooldown = withCooldown(vocab, currentRound);
+
+  return `
+請根據以下單字庫與規則，出 ${QUESTIONS_PER_ROUND} 題單選題。
 當前輪數：${currentRound}
 
 單字庫：
 ${JSON.stringify(vocabWithCooldown)}
 
 【重要提醒】：請注意單字庫中的 \`isCoolingDown\` 屬性。如果為 true，代表該單字正在冷卻期，絕對不能作為主考題（但可以作為背景單字）。如果為 false，代表已經解除冷卻，可以作為主考題。
-請回傳 JSON 格式，包含 \`message\` 欄位（題目內容，請用 Markdown 格式排版）。
+請回傳 JSON 格式，包含 \`questions\` 陣列。陣列內必須剛好有 ${QUESTIONS_PER_ROUND} 題。
+每題必須包含：
+- \`number\`: 題號，從 1 開始。
+- \`stem\`: TOEIC Part 5 題幹，必須包含 _____ 作為填空。
+- \`choices\`: 包含 \`A\`, \`B\`, \`C\`, \`D\` 四個選項字串。
+- \`targetWord\`: 本題主考單字，拼字必須與單字庫完全一致。
+
+不要把選項寫進 \`stem\`，也不要在任何欄位使用 HTML 標籤。
 `;
+}
+
+export async function generateQuestions(vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-3.1-flash-lite-preview'): Promise<GeneratedQuestionPayload> {
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = buildQuestionGenerationPrompt(vocab, currentRound);
 
   try {
     console.log('[Gemini] Generating questions with apiKey length:', apiKey?.length, 'model:', modelName);
@@ -63,9 +146,32 @@ ${JSON.stringify(vocabWithCooldown)}
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              message: { type: Type.STRING }
+              questions: {
+                type: Type.ARRAY,
+                minItems: String(QUESTIONS_PER_ROUND),
+                maxItems: String(QUESTIONS_PER_ROUND),
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    number: { type: Type.INTEGER },
+                    stem: { type: Type.STRING },
+                    choices: {
+                      type: Type.OBJECT,
+                      properties: {
+                        A: { type: Type.STRING },
+                        B: { type: Type.STRING },
+                        C: { type: Type.STRING },
+                        D: { type: Type.STRING }
+                      },
+                      required: ['A', 'B', 'C', 'D']
+                    },
+                    targetWord: { type: Type.STRING }
+                  },
+                  required: ['number', 'stem', 'choices', 'targetWord']
+                }
+              }
             },
-            required: ['message']
+            required: ['questions']
           }
         }
       }),
@@ -74,9 +180,12 @@ ${JSON.stringify(vocabWithCooldown)}
 
     console.log('[Gemini] Response received:', response.text?.substring(0, 200));
     const parsed = JSON.parse(response.text!);
-    return parsed.message
-      .replace(/\\n/g, '\n')
-      .replace(/<br\s*\/?>/gi, '\n');
+    const questions = normalizeQuestions(parsed.questions);
+    const message = questions.length > 0
+      ? formatQuestionsForMarkdown(questions)
+      : normalizeMessage(parsed.message || '');
+
+    return { message, questions };
   } catch (error: any) {
     console.error('[Gemini] generateQuestions ERROR:', error);
     console.error('[Gemini] Error message:', error?.message);
@@ -92,14 +201,7 @@ ${JSON.stringify(vocabWithCooldown)}
 
 export async function evaluateAnswers(questions: string, userAnswer: string, vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-3.1-flash-lite-preview') {
   const ai = new GoogleGenAI({ apiKey });
-  const vocabWithCooldown = vocab.map(v => {
-    const roundsSinceTested = currentRound - v.lastTestedRound;
-    const isCoolingDown = v.lastTestedRound > 0 && roundsSinceTested < 3;
-    return {
-      ...v,
-      isCoolingDown
-    };
-  });
+  const vocabWithCooldown = withCooldown(vocab, currentRound);
 
   const prompt = `
 題目：
@@ -201,9 +303,7 @@ ${JSON.stringify(vocabWithCooldown)}
     }
 
     if (result.message) {
-      result.message = result.message
-        .replace(/\\n/g, '\n')
-        .replace(/<br\s*\/?>/gi, '\n');
+      result.message = normalizeMessage(result.message);
     }
 
     return result;
