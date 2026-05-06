@@ -53,6 +53,11 @@ const SYSTEM_PROMPT = `
 3. 解析與回饋訊息可以使用 Markdown；選擇題本身由前端固定排版。
 `;
 
+const OUTPUT_FORMAT_INSTRUCTION = `
+Do not use LaTeX, KaTeX, MathJax, or $...$ math syntax in any user-facing text.
+Use plain text arrows like -> or →.
+Example: annual conference -> 年度會議`;
+
 function withCooldown(vocab: any[], currentRound: number) {
   return vocab.map((v) => {
     const roundsSinceTested = currentRound - v.lastTestedRound;
@@ -64,12 +69,20 @@ function withCooldown(vocab: any[], currentRound: number) {
   });
 }
 
-function normalizeMessage(message: string) {
+export function normalizeCoachMessage(message: string) {
   return message
     .replace(/\\n/g, '\n')
     .replace(/\r\n/g, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\$\\text\{([^}]*)\}\$/g, '$1')
+    .replace(/\$\\rightarrow\$/g, '->')
+    .replace(/\\rightarrow/g, '->')
+    .replace(/\$([^$\n]+)\$/g, '$1')
     .trim();
+}
+
+function normalizeMessage(message: string) {
+  return normalizeCoachMessage(message);
 }
 
 function toText(value: unknown) {
@@ -180,7 +193,7 @@ export async function generateQuestions(
         model: modelName,
         contents: prompt,
         config: {
-          systemInstruction: SYSTEM_PROMPT,
+          systemInstruction: `${SYSTEM_PROMPT}\n\n${OUTPUT_FORMAT_INSTRUCTION}`,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -284,7 +297,7 @@ ${JSON.stringify(vocabWithCooldown)}
         model: modelName,
         contents: prompt,
         config: {
-          systemInstruction: SYSTEM_PROMPT,
+          systemInstruction: `${SYSTEM_PROMPT}\n\n${OUTPUT_FORMAT_INSTRUCTION}`,
           tools: [{
             functionDeclarations: [{
               name: 'update_vocabulary_levels',

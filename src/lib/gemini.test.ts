@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   buildQuestionGenerationPrompt,
   formatQuestionsForMarkdown,
+  normalizeCoachMessage,
   normalizeVocabularySuggestions,
   type GeneratedQuestion,
 } from './gemini.ts';
@@ -36,6 +37,11 @@ const prompt = buildQuestionGenerationPrompt(
 
 assert.match(prompt, /出 1 題單選題/);
 assert.doesNotMatch(prompt, /出 2 題單選題/);
+
+assert.equal(
+  normalizeCoachMessage('$\\text{annual conference}$ $\\rightarrow$ 年度會議'),
+  'annual conference -> 年度會議'
+);
 
 assert.deepEqual(
   normalizeVocabularySuggestions([
