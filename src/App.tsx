@@ -13,7 +13,10 @@ type VocabItem = {
   lastTestedRound: number;
 };
 
-const AVAILABLE_MODELS = ['gemini-3.1-flash-lite-preview'];
+const AVAILABLE_MODELS = [
+  'gemini-3.1-flash-lite-preview',
+  'gemma-4-31b-it',
+];
 const DEFAULT_MODEL_NAME = AVAILABLE_MODELS[0];
 const GENERATE_QUESTIONS_RETRY_MESSAGE = 'Sorry, I encountered an error generating questions. Please try again.';
 const EVALUATE_ANSWER_RETRY_MESSAGE = 'Sorry, I encountered an error evaluating your answer. Please try again.';
