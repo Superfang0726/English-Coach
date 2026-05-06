@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Chat, Message } from './components/Chat';
 import { VocabTable } from './components/VocabTable';
 import { generateQuestions, evaluateAnswers } from './lib/gemini';
-import { BookOpen, RefreshCw, Download, Upload, Settings } from 'lucide-react';
+import { BookOpen, RefreshCw, Download, Upload, Settings, PanelRightClose, PanelRightOpen } from 'lucide-react';
 
 type VocabItem = {
   word: string;
@@ -11,6 +11,9 @@ type VocabItem = {
   remarks?: string;
   lastTestedRound: number;
 };
+
+const AVAILABLE_MODELS = ['gemini-3.1-flash-lite-preview'];
+const DEFAULT_MODEL_NAME = AVAILABLE_MODELS[0];
 
 export default function App() {
   const [vocab, setVocab] = useState<VocabItem[]>([]);
@@ -21,7 +24,8 @@ export default function App() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [apiKey, setApiKey] = useState('');
-  const [modelName, setModelName] = useState('gemini-2.0-flash');
+  const [modelName, setModelName] = useState(DEFAULT_MODEL_NAME);
+  const [isVocabPanelCollapsed, setIsVocabPanelCollapsed] = useState(false);
   const generationIdRef = React.useRef(0);
 
   // Load initial data
@@ -44,7 +48,11 @@ export default function App() {
 
         if (savedMessages) setMessages(JSON.parse(savedMessages));
         if (savedRound) setCurrentRound(parseInt(savedRound, 10));
-        if (savedModelName) setModelName(savedModelName);
+        if (savedModelName && AVAILABLE_MODELS.includes(savedModelName)) {
+          setModelName(savedModelName);
+        } else {
+          setModelName(DEFAULT_MODEL_NAME);
+        }
         if (savedApiKey) {
           setApiKey(savedApiKey);
         } else if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY') {
@@ -364,9 +372,19 @@ export default function App() {
       </header>
 
       <main className="flex flex-1 overflow-hidden p-6 gap-6">
-        <div className="flex w-1/2 flex-col">
+        <div className={`flex min-w-0 flex-col transition-all duration-200 ${isVocabPanelCollapsed ? 'w-full' : 'w-1/2'}`}>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-800">Training Session</h2>
+            {isVocabPanelCollapsed && (
+              <button
+                onClick={() => setIsVocabPanelCollapsed(false)}
+                className="flex items-center space-x-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900"
+                title="Show vocabulary database"
+              >
+                <PanelRightOpen className="h-4 w-4" />
+                <span>Show Vocabulary</span>
+              </button>
+            )}
           </div>
           <div className="flex-1 overflow-hidden">
             <Chat
@@ -378,10 +396,11 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex w-1/2 flex-col">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-800">Vocabulary Database</h2>
-            <div className="flex space-x-2">
+        {!isVocabPanelCollapsed && (
+          <div className="flex min-w-0 w-1/2 flex-col transition-all duration-200">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-800">Vocabulary Database</h2>
+              <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
                 🟢 O: {vocab.filter((v) => v.level === 'O').length}
               </span>
@@ -391,6 +410,14 @@ export default function App() {
               <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
                 🔴 X: {vocab.filter((v) => v.level === 'X').length}
               </span>
+              <button
+                onClick={() => setIsVocabPanelCollapsed(true)}
+                className="flex shrink-0 items-center space-x-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900"
+                title="Hide vocabulary database"
+              >
+                <PanelRightClose className="h-4 w-4" />
+                <span>Hide</span>
+              </button>
             </div>
           </div>
           <div className="flex-1 overflow-hidden">
@@ -403,7 +430,8 @@ export default function App() {
               />
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </main>
 
       {showResetConfirm && (
@@ -476,10 +504,9 @@ export default function App() {
                   onChange={(e) => setModelName(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
                 >
-                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                  <option value="gemini-2.0-pro-exp-02-05">gemini-2.0-pro-exp-02-05</option>
-                  <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
+                  {AVAILABLE_MODELS.map((model) => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
                   Select which model variant to use.

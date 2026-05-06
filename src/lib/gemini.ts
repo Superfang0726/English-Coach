@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = `
 2. 選擇題的各個選項（A, B, C, D）之間**必須換行**，讓每個選項獨立一行，方便閱讀。
 `;
 
-export async function generateQuestions(vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-2.0-flash') {
+export async function generateQuestions(vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-3.1-flash-lite-preview') {
   const ai = new GoogleGenAI({ apiKey });
   const vocabWithCooldown = vocab.map(v => {
     const roundsSinceTested = currentRound - v.lastTestedRound;
@@ -90,7 +90,7 @@ ${JSON.stringify(vocabWithCooldown)}
   }
 }
 
-export async function evaluateAnswers(questions: string, userAnswer: string, vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-2.0-flash') {
+export async function evaluateAnswers(questions: string, userAnswer: string, vocab: any[], currentRound: number, apiKey: string, modelName: string = 'gemini-3.1-flash-lite-preview') {
   const ai = new GoogleGenAI({ apiKey });
   const vocabWithCooldown = vocab.map(v => {
     const roundsSinceTested = currentRound - v.lastTestedRound;
