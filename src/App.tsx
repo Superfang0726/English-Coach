@@ -3,6 +3,7 @@ import { Chat, Message } from './components/Chat';
 import { VocabTable } from './components/VocabTable';
 import { generateQuestions, evaluateAnswers, formatQuestionsForMarkdown, type SuggestedVocabularyAddition } from './lib/gemini';
 import { DARK_READING_MODE_STORAGE_KEY, parseDarkReadingModePreference } from './lib/readingMode';
+import { getRetryAttemptStatus, MAX_RETRY_ATTEMPTS } from './lib/retryAttempts';
 import { BookOpen, RefreshCw, Download, Settings, PanelRightClose, PanelRightOpen, Moon, Sun, Check, X } from 'lucide-react';
 
 type VocabItem = {
@@ -47,6 +48,7 @@ export default function App() {
   const [isDarkReadingMode, setIsDarkReadingMode] = useState(false);
   const [pendingVocabularySuggestions, setPendingVocabularySuggestions] = useState<SuggestedVocabularyAddition[]>([]);
   const [pendingRetryAction, setPendingRetryAction] = useState<RetryAction | null>(null);
+  const [retryAttemptCount, setRetryAttemptCount] = useState(0);
   const generationIdRef = React.useRef(0);
 
   // Load initial data
@@ -77,6 +79,7 @@ export default function App() {
                 ? 'generateQuestions'
                 : 'evaluateAnswer'
             );
+            setRetryAttemptCount(MAX_RETRY_ATTEMPTS);
           }
           setMessages(parsedMessages.filter((message) => !isRetryableErrorMessage(message)));
         }
@@ -111,6 +114,7 @@ export default function App() {
         ? 'generateQuestions'
         : 'evaluateAnswer'
     );
+    setRetryAttemptCount(MAX_RETRY_ATTEMPTS);
     setMessages((current) => current.filter((message) => !isRetryableErrorMessage(message)));
   }, [messages]);
 
@@ -202,7 +206,7 @@ export default function App() {
     }
   };
 
-  const handleGenerateQuestions = async (roundOverride?: number) => {
+  const handleGenerateQuestions = async (roundOverride?: number, attemptNumber = 1) => {
     if (!apiKey) {
       setMessages((prev) => [
         ...prev,
@@ -228,7 +232,10 @@ export default function App() {
       return;
     }
     setIsGenerating(true);
-    setPendingRetryAction(null);
+    if (attemptNumber === 1) {
+      setPendingRetryAction(null);
+      setRetryAttemptCount(0);
+    }
     const currentGenId = ++generationIdRef.current;
     const roundToUse = roundOverride ?? currentRound;
     try {
@@ -241,12 +248,15 @@ export default function App() {
         questions: questionPayload.questions,
         isQuestion: true,
       };
+      setPendingRetryAction(null);
+      setRetryAttemptCount(0);
       setMessages((prev) => [...prev, newMessage]);
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to generate questions:', error);
       if (error?.status !== 429) {
         setPendingRetryAction('generateQuestions');
+        setRetryAttemptCount(attemptNumber);
       }
 
       let errorMessage = 'Sorry, I encountered an error generating questions. Please try again.';
@@ -254,15 +264,25 @@ export default function App() {
         errorMessage = '⚠️ API 額度已耗盡 (Quota Exceeded)。請稍後再試，或更換其他模型的 API Key。';
       }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: errorMessage,
-          isQuestion: false,
-        },
-      ]);
+      if (error?.status === 429 || attemptNumber >= MAX_RETRY_ATTEMPTS) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: errorMessage,
+            isQuestion: false,
+          },
+        ]);
+      }
+
+      if (error?.status !== 429 && attemptNumber < MAX_RETRY_ATTEMPTS) {
+        window.setTimeout(() => {
+          if (currentGenId === generationIdRef.current) {
+            handleGenerateQuestions(roundToUse, attemptNumber + 1);
+          }
+        }, 0);
+      }
     } finally {
       if (currentGenId === generationIdRef.current) {
         setIsGenerating(false);
@@ -270,7 +290,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (userAnswer: string, options: { appendUserMessage?: boolean } = {}) => {
+  const handleSendMessage = async (userAnswer: string, options: { appendUserMessage?: boolean; attemptNumber?: number } = {}) => {
     if (!apiKey) {
       setMessages((prev) => [
         ...prev,
@@ -292,7 +312,11 @@ export default function App() {
       setMessages((prev) => [...prev, userMsg]);
     }
     setIsGenerating(true);
-    setPendingRetryAction(null);
+    const attemptNumber = options.attemptNumber ?? 1;
+    if (attemptNumber === 1) {
+      setPendingRetryAction(null);
+      setRetryAttemptCount(0);
+    }
     const currentGenId = ++generationIdRef.current;
 
     try {
@@ -370,12 +394,15 @@ export default function App() {
         content: result.message,
         isQuestion: false,
       };
+      setPendingRetryAction(null);
+      setRetryAttemptCount(0);
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (error) {
       if (currentGenId !== generationIdRef.current) return;
       console.error('Failed to evaluate answers:', error);
       if (error?.status !== 429) {
         setPendingRetryAction('evaluateAnswer');
+        setRetryAttemptCount(attemptNumber);
       }
 
       let errorMessage = 'Sorry, I encountered an error evaluating your answer. Please try again.';
@@ -383,15 +410,25 @@ export default function App() {
         errorMessage = '⚠️ API 額度已耗盡 (Quota Exceeded)。請稍後再試，或更換其他模型的 API Key。';
       }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: errorMessage,
-          isQuestion: false,
-        },
-      ]);
+      if (error?.status === 429 || attemptNumber >= MAX_RETRY_ATTEMPTS) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: errorMessage,
+            isQuestion: false,
+          },
+        ]);
+      }
+
+      if (error?.status !== 429 && attemptNumber < MAX_RETRY_ATTEMPTS) {
+        window.setTimeout(() => {
+          if (currentGenId === generationIdRef.current) {
+            handleSendMessage(userAnswer, { appendUserMessage: false, attemptNumber: attemptNumber + 1 });
+          }
+        }, 0);
+      }
     } finally {
       if (currentGenId === generationIdRef.current) {
         setIsGenerating(false);
@@ -407,13 +444,13 @@ export default function App() {
 
   const handleRetry = () => {
     if (pendingRetryAction === 'generateQuestions') {
-      handleGenerateQuestions();
+      handleGenerateQuestions(undefined, 1);
       return;
     }
 
     const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user');
     if (pendingRetryAction === 'evaluateAnswer' && lastUserMessage) {
-      handleSendMessage(lastUserMessage.content, { appendUserMessage: false });
+      handleSendMessage(lastUserMessage.content, { appendUserMessage: false, attemptNumber: 1 });
     }
   };
 
@@ -427,6 +464,7 @@ export default function App() {
     setCurrentRound(1);
     setIsGenerating(false);
     setPendingRetryAction(null);
+    setRetryAttemptCount(0);
     localStorage.removeItem('toeic_chat_messages');
     localStorage.removeItem('toeic_current_round');
     setShowResetConfirm(false);
@@ -434,6 +472,7 @@ export default function App() {
 
   const currentVocabularySuggestion = pendingVocabularySuggestions[0];
   const visibleMessages = messages.filter((message) => !isRetryableErrorMessage(message));
+  const retryAttemptStatus = getRetryAttemptStatus(retryAttemptCount);
 
   if (isLoading) {
     return (
@@ -518,6 +557,8 @@ export default function App() {
               onNextRound={handleNextRound}
               onRetry={handleRetry}
               hasRetryAction={pendingRetryAction !== null}
+              retryAttemptCount={retryAttemptStatus.attemptedTimes}
+              canRetryManually={retryAttemptStatus.canRetryManually}
               isDarkReadingMode={isDarkReadingMode}
             />
             {currentVocabularySuggestion && (
